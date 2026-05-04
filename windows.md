@@ -22,62 +22,59 @@ powershell -NoProfile -Command "$d=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\W
 $regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
 $valueName = "DigitalProductId"
 
-# read DigitalProductId
 $dpid = (Get-ItemProperty -Path $regPath -Name $valueName -ErrorAction Stop).$valueName
 
-# convert DigitalProductId to Product Key
 function Convert-DPIDToProductKey {
     param([byte[]]$dpid)
     $keyOffset = 52
-    $isWin8 = ($dpid[66] -band 0xFF) / 6 -band 1
+    $isWin8 = (($dpid[66] -band 0xFF) -shr 3) -band 1
 
+    $chars = "BCDFGHJKMPQRTVWXY2346789"
     if ($isWin8 -eq 1) {
-        $key = ""
-        $chars = "BCDFGHJKMPQRTVWXY2346789"
+        $dp = New-Object byte[] 15
+        [Array]::Copy($dpid, $keyOffset, $dp, 0, 15)
+
         $last = 0
-        $dpid[66] = ($dpid[66] -band 0xF7) -bor (($last -shr 0) -band 0x08)
-        for ($i = 24; $i -ge 0; $i--) {
-            $cur = 0
-            for ($j = 14; $j -ge 0; $j--) {
-                $cur = $cur * 256 -bxor $dpid[$j + $keyOffset]
-                $dpid[$j + $keyOffset] = [math]::Floor($cur / 24)
-                $cur = $cur % 24
-            }
-            $key += $chars[$cur]
-        }
-        $key = $key.Substring(1, $key.Length -1) + "N" + $key[0]
-        for ($k = 5; $k -lt $key.Length; $k += 6) {
-            $key = $key.Insert($k, "-")
-            $k++
-        }
-        return $key
-    } else {
-        $chars = "BCDFGHJKMPQRTVWXY2346789"
+        for ($i = 0; $i -lt 15; $i++) { $last = ($last -bxor $dp[$i]) }
+        $dp[14] = ($dp[14] -bxor ($last -shr 0))
+
         $key = ""
         for ($i = 24; $i -ge 0; $i--) {
-            $current = 0
+            $acc = 0
             for ($j = 14; $j -ge 0; $j--) {
-                $current = $current * 256 + $dpid[$j + $keyOffset]
-                $dpid[$j + $keyOffset] = [math]::Floor($current / 24)
-                $current = $current % 24
+                $acc = $acc * 256 -bxor $dp[$j]
+                $dp[$j] = [math]::Floor($acc / 24)
+                $acc = $acc % 24
             }
-            $key += $chars[$current]
+            $key += $chars[$acc]
+        }
+        $key = $key.Substring(1) + "N" + $key[0]
+    } else {
+        $dp = New-Object byte[] 15
+        [Array]::Copy($dpid, $keyOffset, $dp, 0, 15)
+
+        $key = ""
+        for ($i = 24; $i -ge 0; $i--) {
+            $acc = 0
+            for ($j = 14; $j -ge 0; $j--) {
+                $acc = $acc * 256 + $dp[$j]
+                $dp[$j] = [math]::Floor($acc / 24)
+                $acc = $acc % 24
+            }
+            $key += $chars[$acc]
         }
         $key = $key.ToCharArray() -join ""
-        $result = ""
-        for ($i = 0; $i -lt $key.Length; $i++) {
-            if (($i % 5) -eq 0 -and $i -ne 0) { $result += "-" }
-            $result += $key[$i]
-        }
-        return $result
     }
+
+    $out = ""
+    for ($i = 0; $i -lt $key.Length; $i++) {
+        if (($i -ne 0) -and (($i % 5) -eq 0)) { $out += "-" }
+        $out += $key[$i]
+    }
+    return $out
 }
 
-$dpidCopy = New-Object byte[] $dpid.Length
-[Array]::Copy($dpid, $dpidCopy, $dpid.Length)
-
-# show Product Key
-Convert-DPIDToProductKey -dpid $dpidCopy
+Convert-DPIDToProductKey -dpid $dpid
 ```
 
 - verify activation status
