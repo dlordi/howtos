@@ -21,54 +21,35 @@ powershell -NoProfile -Command "$d=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\W
 ```ps1
 $regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
 $valueName = "DigitalProductId"
-
 $dpid = (Get-ItemProperty -Path $regPath -Name $valueName -ErrorAction Stop).$valueName
 
 function Convert-DPIDToProductKey {
     param([byte[]]$dpid)
     $keyOffset = 52
-    $isWin8 = (($dpid[66] -band 0xFF) -shr 3) -band 1
-
     $chars = "BCDFGHJKMPQRTVWXY2346789"
-    if ($isWin8 -eq 1) {
-        $dp = New-Object byte[] 15
-        [Array]::Copy($dpid, $keyOffset, $dp, 0, 15)
 
-        $last = 0
-        for ($i = 0; $i -lt 15; $i++) { $last = ($last -bxor $dp[$i]) }
-        $dp[14] = ($dp[14] -bxor ($last -shr 0))
+    $dp = New-Object byte[] 15
+    [Array]::Copy($dpid, $keyOffset, $dp, 0, 15)
 
-        $key = ""
-        for ($i = 24; $i -ge 0; $i--) {
-            $acc = 0
-            for ($j = 14; $j -ge 0; $j--) {
-                $acc = $acc * 256 -bxor $dp[$j]
-                $dp[$j] = [math]::Floor($acc / 24)
-                $acc = $acc % 24
-            }
-            $key += $chars[$acc]
+    $keyChars = New-Object System.Text.StringBuilder
+    for ($i = 24; $i -ge 0; $i--) {
+        $acc = 0
+        for ($j = 14; $j -ge 0; $j--) {
+            $acc = ($acc * 256) + $dp[$j]
+            $dp[$j] = [math]::Floor($acc / 24)
+            $acc = $acc % 24
         }
-        $key = $key.Substring(1) + "N" + $key[0]
-    } else {
-        $dp = New-Object byte[] 15
-        [Array]::Copy($dpid, $keyOffset, $dp, 0, 15)
-
-        $key = ""
-        for ($i = 24; $i -ge 0; $i--) {
-            $acc = 0
-            for ($j = 14; $j -ge 0; $j--) {
-                $acc = $acc * 256 + $dp[$j]
-                $dp[$j] = [math]::Floor($acc / 24)
-                $acc = $acc % 24
-            }
-            $key += $chars[$acc]
-        }
-        $key = $key.ToCharArray() -join ""
+        $keyChars.Append($chars[$acc]) | Out-Null
     }
 
+    $key = $keyChars.ToString()
+
+    if ($key.Length -lt 25) { $key = $key.PadLeft(25, 'B') }
+    if ($key.Length -gt 25) { $key = $key.Substring(0,25) }
+
     $out = ""
-    for ($i = 0; $i -lt $key.Length; $i++) {
-        if (($i -ne 0) -and (($i % 5) -eq 0)) { $out += "-" }
+    for ($i = 0; $i -lt 25; $i++) {
+        if ($i -ne 0 -and ($i % 5) -eq 0) { $out += "-" }
         $out += $key[$i]
     }
     return $out
